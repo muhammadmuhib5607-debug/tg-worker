@@ -16,8 +16,6 @@ def upload_chunk():
         file_name = request.form.get('file_name')
         chunk_index = int(request.form.get('chunk_index', 0))
         total_chunks = int(request.form.get('total_chunks', 1))
-        username = request.form.get('username', 'user')
-        callback_url = request.form.get('callback_url')
         
         file_chunk = request.files.get('file_chunk')
         if not file_chunk:
@@ -48,14 +46,22 @@ def upload_chunk():
 
             ext = file_name.split('.')[-1].lower()
             is_video = ext in ['mp4', 'mkv', 'webm', 'avi', 'mov', '3gp']
-            tg_method = "sendVideo" if is_video else "sendDocument"
-            field_name = "video" if is_video else "document"
+            is_audio = ext in ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'opus', 'wma']
+            
+            if is_video:
+                tg_method = "sendVideo"
+                field_name = "video"
+            elif is_audio:
+                tg_method = "sendAudio"
+                field_name = "audio"
+            else:
+                tg_method = "sendDocument"
+                field_name = "document"
 
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{tg_method}"
             with open(merged_path, 'rb') as f:
                 files = {field_name: (file_name, f)}
                 data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': file_name}
-                # Timeout extended to 1200 seconds for heavy 500MB videos
                 response = requests.post(url, data=data, files=files, timeout=1200)
 
             if os.path.exists(merged_path):
@@ -64,22 +70,22 @@ def upload_chunk():
             res_json = response.json()
             if res_json.get('ok'):
                 result_data = res_json['result']
-                file_id = result_data.get('document', {}).get('file_id') or result_data.get('video', {}).get('file_id') or result_data.get('audio', {}).get('file_id')
                 
-                if callback_url and file_id:
-                    try:
-                        requests.post(callback_url, data={
-                            'sync_secret': 'MuhibSecretPassKey2026',
-                            'username': username,
-                            'file_name': file_name,
-                            'ext': ext,
-                            'size': formatted_size,
-                            'file_id': file_id
-                        }, timeout=20)
-                    except Exception as cb_err:
-                        pass
+                # Sahi tarike se file_id extract karna chahe video ho, audio ho ya document
+                file_id = None
+                if 'document' in result_data:
+                    file_id = result_data['document']['file_id']
+                elif 'video' in result_data:
+                    file_id = result_data['video']['file_id']
+                elif 'audio' in result_data:
+                    file_id = result_data['audio']['file_id']
+                elif 'photo' in result_data:
+                    file_id = result_data['photo'][-1]['file_id']
 
-                return jsonify({'status': 'success', 'file_id': file_id})
+                if not file_id:
+                    return jsonify({'status': 'error', 'message': 'Failed to extract file_id from Telegram'}), 400
+
+                return jsonify({'status': 'success', 'file_id': file_id, 'size': formatted_size, 'ext': ext})
             else:
                 return jsonify({'status': 'error', 'message': res_json.get('description', 'Telegram error')}), 400
 
