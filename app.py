@@ -16,7 +16,9 @@ def upload_chunk():
         file_name = request.form.get('file_name')
         chunk_index = int(request.form.get('chunk_index', 0))
         total_chunks = int(request.form.get('total_chunks', 1))
-
+        current_user = request.form.get('current_user')
+        website_url = request.form.get('website_url')
+        
         file_chunk = request.files.get('file_chunk')
         if not file_chunk:
             return jsonify({'status': 'error', 'message': 'No chunk provided'}), 400
@@ -36,6 +38,7 @@ def upload_chunk():
                             outfile.write(infile.read())
                         os.remove(c_path)
 
+            file_size_bytes = os.path.getsize(merged_path)
             ext = file_name.split('.')[-1].lower()
             is_video = ext in ['mp4', 'mkv', 'webm', 'avi', 'mov', '3gp']
             tg_method = "sendVideo" if is_video else "sendDocument"
@@ -49,11 +52,27 @@ def upload_chunk():
 
             if os.path.exists(merged_path):
                 os.remove(merged_path)
-
+            
             res_json = response.json()
             if res_json.get('ok'):
                 result_data = res_json['result']
-                file_id = result_data.get('document', {}).get('file_id') or result_data.get('video', {}).get('file_id')
+                file_id = result_data.get('document', {}).get('file_id') or result_data.get('video', {}).get('file_id') or result_data.get('audio', {}).get('file_id')
+                
+                # Callback to InfinityFree website to save metadata
+                if website_url and current_user:
+                    try:
+                        callback_data = {
+                            'ajax_action': 'save_uploaded_meta',
+                            'user': current_user,
+                            'name': file_name,
+                            'ext': ext,
+                            'size_bytes': file_size_bytes,
+                            'file_id': file_id
+                        }
+                        requests.post(website_url, data=callback_data, timeout=15)
+                    except Exception as cb_err:
+                        pass
+
                 return jsonify({'status': 'success', 'file_id': file_id})
             else:
                 return jsonify({'status': 'error', 'message': res_json.get('description', 'Telegram error')}), 400
