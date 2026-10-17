@@ -16,8 +16,8 @@ def upload_chunk():
         file_name = request.form.get('file_name')
         chunk_index = int(request.form.get('chunk_index', 0))
         total_chunks = int(request.form.get('total_chunks', 1))
-        current_user = request.form.get('current_user')
-        website_url = request.form.get('website_url')
+        username = request.form.get('username', 'user')
+        callback_url = request.form.get('callback_url')
         
         file_chunk = request.files.get('file_chunk')
         if not file_chunk:
@@ -39,6 +39,13 @@ def upload_chunk():
                         os.remove(c_path)
 
             file_size_bytes = os.path.getsize(merged_path)
+            if file_size_bytes < 1024:
+                formatted_size = f"{file_size_bytes} B"
+            elif file_size_bytes < 1048576:
+                formatted_size = f"{round(file_size_bytes / 1024, 2)} KB"
+            else:
+                formatted_size = f"{round(file_size_bytes / 1048576, 2)} MB"
+
             ext = file_name.split('.')[-1].lower()
             is_video = ext in ['mp4', 'mkv', 'webm', 'avi', 'mov', '3gp']
             tg_method = "sendVideo" if is_video else "sendDocument"
@@ -48,7 +55,8 @@ def upload_chunk():
             with open(merged_path, 'rb') as f:
                 files = {field_name: (file_name, f)}
                 data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': file_name}
-                response = requests.post(url, data=data, files=files, timeout=600)
+                # Timeout extended to 1200 seconds for heavy 500MB videos
+                response = requests.post(url, data=data, files=files, timeout=1200)
 
             if os.path.exists(merged_path):
                 os.remove(merged_path)
@@ -58,18 +66,16 @@ def upload_chunk():
                 result_data = res_json['result']
                 file_id = result_data.get('document', {}).get('file_id') or result_data.get('video', {}).get('file_id') or result_data.get('audio', {}).get('file_id')
                 
-                # Callback to InfinityFree website to save metadata
-                if website_url and current_user:
+                if callback_url and file_id:
                     try:
-                        callback_data = {
-                            'ajax_action': 'save_uploaded_meta',
-                            'user': current_user,
-                            'name': file_name,
+                        requests.post(callback_url, data={
+                            'sync_secret': 'MuhibSecretPassKey2026',
+                            'username': username,
+                            'file_name': file_name,
                             'ext': ext,
-                            'size_bytes': file_size_bytes,
+                            'size': formatted_size,
                             'file_id': file_id
-                        }
-                        requests.post(website_url, data=callback_data, timeout=15)
+                        }, timeout=20)
                     except Exception as cb_err:
                         pass
 
