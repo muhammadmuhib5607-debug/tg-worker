@@ -4,15 +4,15 @@ from pyrogram import Client
 
 app = Flask(__name__)
 
-# Public API Credentials & Environment Variables
+# Public API Credentials
 API_ID = int(os.environ.get("API_ID", 2040))
 API_HASH = os.environ.get("API_HASH", "b18441a1ff607e10a989891a5462e627")
-SESSION_STRING = os.environ.get("SESSION_STRING")  # Session string zarouri hai cloud par login ke liye
-CHANNEL_ID = os.environ.get("CHANNEL_ID", "me")    # Jahan files save hongi (jaise "me" matlab Saved Messages)
+SESSION_STRING = os.environ.get("SESSION_STRING")  # Session string user account login ke liye
+CHANNEL_ID = os.environ.get("CHANNEL_ID", "me")
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Telegram 2GB Uploader Worker is Running Successfully!"
+    return "Telegram 2GB Client Worker is Running Successfully!"
 
 @app.route("/upload", methods=["POST"])
 def upload_file():
@@ -24,6 +24,7 @@ def upload_file():
     file_path = os.path.join("/tmp", filename)
     file.save(file_path)
 
+    # Pyrogram Client (User API / 2GB Support)
     client = Client(
         "uploader_session",
         api_id=API_ID,
@@ -35,18 +36,16 @@ def upload_file():
     try:
         client.start()
         
-        # Telegram par file upload karein (Up to 2GB supported)
+        # 2GB tak ki file upload karne ke liye send_document
         sent_message = client.send_document(
             chat_id=CHANNEL_ID,
             document=file_path,
-            caption=f"Uploaded via Web App: {filename}"
+            caption=f"Uploaded via Cloudin: {filename}"
         )
         
-        # File ID nikal lein taake user baad mein download kar sake
         file_id = sent_message.document.file_id
         client.stop()
 
-        # Local temporary file delete kar dein taake storage full na ho
         if os.path.exists(file_path):
             os.remove(file_path)
 
@@ -54,7 +53,7 @@ def upload_file():
             "status": "success",
             "file_name": filename,
             "file_id": file_id,
-            "message": "File successfully uploaded to Telegram storage!"
+            "message": "File successfully uploaded via Telegram User API!"
         })
 
     except Exception as e:
