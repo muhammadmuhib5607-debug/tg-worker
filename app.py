@@ -1,98 +1,68 @@
 import os
-import requests
 from flask import Flask, request, jsonify
-from flask_cors import CORS
+from pyrogram import Client
 
 app = Flask(__name__)
-CORS(app)
 
-TELEGRAM_BOT_TOKEN = "8778173164:AAHYdfF33Pv2VwolQ2ynltEk2N3j1c8djh0"
-TELEGRAM_CHAT_ID = "-1004358868963"
+# Public API Credentials & Environment Variables
+API_ID = int(os.environ.get("API_ID", 2040))
+API_HASH = os.environ.get("API_HASH", "b18441a1ff607e10a989891a5462e627")
+SESSION_STRING = os.environ.get("SESSION_STRING")  # Session string zarouri hai cloud par login ke liye
+CHANNEL_ID = os.environ.get("CHANNEL_ID", "me")    # Jahan files save hongi (jaise "me" matlab Saved Messages)
 
-@app.route('/upload', methods=['POST'])
-def upload_chunk():
+@app.route("/", methods=["GET"])
+def home():
+    return "Telegram 2GB Uploader Worker is Running Successfully!"
+
+@app.route("/upload", methods=["POST"])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    
+    file = request.files['file']
+    filename = file.filename
+    file_path = os.path.join("/tmp", filename)
+    file.save(file_path)
+
+    client = Client(
+        "uploader_session",
+        api_id=API_ID,
+        api_hash=API_HASH,
+        session_string=SESSION_STRING,
+        in_memory=True
+    )
+
     try:
-        upload_id = request.form.get('upload_id')
-        file_name = request.form.get('file_name')
-        chunk_index = int(request.form.get('chunk_index', 0))
-        total_chunks = int(request.form.get('total_chunks', 1))
+        client.start()
         
-        file_chunk = request.files.get('file_chunk')
-        if not file_chunk:
-            return jsonify({'status': 'error', 'message': 'No chunk provided'}), 400
+        # Telegram par file upload karein (Up to 2GB supported)
+        sent_message = client.send_document(
+            chat_id=CHANNEL_ID,
+            document=file_path,
+            caption=f"Uploaded via Web App: {filename}"
+        )
+        
+        # File ID nikal lein taake user baad mein download kar sake
+        file_id = sent_message.document.file_id
+        client.stop()
 
-        temp_dir = f"/tmp/chunks_{upload_id}"
-        os.makedirs(temp_dir, exist_ok=True)
-        chunk_path = os.path.join(temp_dir, f"chunk_{chunk_index}")
-        file_chunk.save(chunk_path)
+        # Local temporary file delete kar dein taake storage full na ho
+        if os.path.exists(file_path):
+            os.remove(file_path)
 
-        if chunk_index + 1 == total_chunks:
-            merged_path = os.path.join(temp_dir, f"merged_{file_name}")
-            with open(merged_path, 'wb') as outfile:
-                for i in range(total_chunks):
-                    c_path = os.path.join(temp_dir, f"chunk_{i}")
-                    if os.path.exists(c_path):
-                        with open(c_path, 'rb') as infile:
-                            outfile.write(infile.read())
-                        os.remove(c_path)
+        return jsonify({
+            "status": "success",
+            "file_name": filename,
+            "file_id": file_id,
+            "message": "File successfully uploaded to Telegram storage!"
+        })
 
-            file_size_bytes = os.path.getsize(merged_path)
-            if file_size_bytes < 1024:
-                formatted_size = f"{file_size_bytes} B"
-            elif file_size_bytes < 1048576:
-                formatted_size = f"{round(file_size_bytes / 1024, 2)} KB"
-            else:
-                formatted_size = f"{round(file_size_bytes / 1048576, 2)} MB"
-
-            ext = file_name.split('.')[-1].lower()
-            is_video = ext in ['mp4', 'mkv', 'webm', 'avi', 'mov', '3gp']
-            is_audio = ext in ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'opus', 'wma']
-            
-            if is_video:
-                tg_method = "sendVideo"
-                field_name = "video"
-            elif is_audio:
-                tg_method = "sendAudio"
-                field_name = "audio"
-            else:
-                tg_method = "sendDocument"
-                field_name = "document"
-
-            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{tg_method}"
-            with open(merged_path, 'rb') as f:
-                files = {field_name: (file_name, f)}
-                data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': file_name}
-                response = requests.post(url, data=data, files=files, timeout=1200)
-
-            if os.path.exists(merged_path):
-                os.remove(merged_path)
-            
-            res_json = response.json()
-            if res_json.get('ok'):
-                result_data = res_json['result']
-                
-                # Sahi tarike se file_id extract karna chahe video ho, audio ho ya document
-                file_id = None
-                if 'document' in result_data:
-                    file_id = result_data['document']['file_id']
-                elif 'video' in result_data:
-                    file_id = result_data['video']['file_id']
-                elif 'audio' in result_data:
-                    file_id = result_data['audio']['file_id']
-                elif 'photo' in result_data:
-                    file_id = result_data['photo'][-1]['file_id']
-
-                if not file_id:
-                    return jsonify({'status': 'error', 'message': 'Failed to extract file_id from Telegram'}), 400
-
-                return jsonify({'status': 'success', 'file_id': file_id, 'size': formatted_size, 'ext': ext})
-            else:
-                return jsonify({'status': 'error', 'message': res_json.get('description', 'Telegram error')}), 400
-
-        return jsonify({'status': 'next_chunk'})
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        if client.is_connected:
+            client.stop()
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        return jsonify({"error": str(e)}), 500
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
